@@ -178,6 +178,7 @@
                         >
                           Quét Màn Hình
                         </v-btn>
+
                         <v-btn
                           @click="processCurrentImage"
                           color="primary"
@@ -456,7 +457,7 @@
     processImage,
     drawBoundingBoxes,
     updateBoardGrid,
-    scanScreen, // <--- ĐÃ THÊM HÀM QUÉT MÀN HÌNH VÀO ĐÂY
+    scanScreen, // Added scanScreen
   } = useImageRecognition()
 
   // Calculate row/col to percentage coordinates
@@ -1694,7 +1695,6 @@
         font-size: 11px;
         padding: 4px 8px;
         min-width: auto;
-        height: 28px;
       }
     }
   }
@@ -1703,79 +1703,267 @@
     @media (max-width: 768px) {
       font-size: 11px;
       padding: 4px 8px;
-      height: 24px;
     }
   }
 
   .validation-alert {
     @media (max-width: 768px) {
-      font-size: 10px;
-      padding: 6px;
-      margin-top: 4px;
+      font-size: 11px;
+      padding: 8px;
     }
   }
 
   .position-editor-container {
     @media (max-width: 768px) {
-      padding: 4px !important;
+      padding: 8px !important;
     }
   }
 
   .board-col {
     @media (max-width: 768px) {
-      padding: 2px !important;
+      padding: 4px !important;
     }
   }
 
   .selector-col {
     @media (max-width: 768px) {
-      padding: 2px !important;
+      padding: 4px !important;
     }
   }
 
-  // Reduce dialog padding on mobile
-  .v-card-text {
-    padding: 8px !important;
+  .side-to-move {
+    margin-top: 0 !important;
   }
 
-  .v-card-actions {
-    padding: 8px !important;
+  // Hide desktop-only elements on mobile
+  .desktop-only {
+    @media (max-width: 768px) {
+      display: none !important;
+    }
   }
 
-  // Mobile image recognition styles
+  // Image recognition styles
+  .image-recognition-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
   .upload-area {
-    padding: 16px;
-    min-height: 120px;
+    border: 2px dashed rgba(var(--v-border-color), var(--v-border-opacity));
+    border-radius: 8px;
+    padding: 32px;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &.drag-over {
+      border-color: rgb(var(--v-theme-primary));
+      background-color: rgba(var(--v-theme-primary), 0.05);
+    }
 
     .upload-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: rgba(var(--v-theme-on-surface), 0.6);
+
       p {
-        font-size: 12px;
+        margin: 0;
+        font-size: 14px;
       }
     }
 
-    .preview-image {
-      max-height: 200px;
+    .image-preview {
+      display: flex;
+      justify-content: center;
+
+      .image-stage {
+        position: relative;
+        display: inline-block;
+        max-width: 100%;
+      }
+
+      .preview-image {
+        display: block;
+        max-width: 100%;
+        max-height: 400px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .overlay-canvas {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
     }
   }
 
   .recognition-controls {
-    gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
 
-    .v-btn {
-      font-size: 12px;
-      padding: 4px 12px;
-      min-width: auto;
+  .recognition-results {
+    .board-grid-display {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      gap: 2px;
+      max-width: 300px;
+      margin: 0 auto;
+
+      .grid-row {
+        display: contents;
+      }
+
+      .grid-cell {
+        aspect-ratio: 1;
+        border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: bold;
+        background-color: rgb(var(--v-theme-surface));
+        min-height: 24px;
+
+        &.has-piece {
+          background-color: rgba(var(--v-theme-primary), 0.1);
+          color: rgb(var(--v-theme-primary));
+        }
+      }
     }
   }
 
-  .board-grid-display {
-    grid-template-columns: repeat(9, 1fr);
-    gap: 1px;
+  // More compact layout for mobile portrait
+  @media (max-width: 768px) {
+    .piece-selector {
+      padding: 6px;
+      max-height: 250px;
+    }
 
-    .grid-cell {
-      min-height: 20px;
+    .selected-piece-info {
+      padding: 6px;
+      margin-bottom: 8px;
+
+      .selected-piece-display {
+        gap: 4px;
+        margin-bottom: 4px;
+      }
+
+      .piece-img-large {
+        width: 20px;
+        height: 20px;
+      }
+
+      .hint-text {
+        font-size: 10px;
+      }
+    }
+
+    .piece-category {
+      margin-bottom: 6px;
+    }
+
+    .piece-grid {
+      grid-template-columns: repeat(8, 1fr);
+      gap: 1px;
+    }
+
+    .piece-option {
+      padding: 3px;
+
+      .piece-img {
+        width: 14px;
+        height: 14px;
+      }
+    }
+
+    .action-buttons {
+      gap: 1px !important;
+
+      .v-btn {
+        font-size: 10px;
+        padding: 2px 6px;
+        min-width: auto;
+        height: 28px;
+      }
+    }
+
+    .side-indicator {
       font-size: 10px;
+      padding: 2px 6px;
+      height: 24px;
+    }
+
+    .validation-alert {
+      font-size: 10px;
+      padding: 6px;
+      margin-top: 4px;
+    }
+
+    .position-editor-container {
+      padding: 4px !important;
+    }
+
+    .board-col {
+      padding: 2px !important;
+    }
+
+    .selector-col {
+      padding: 2px !important;
+    }
+
+    // Reduce dialog padding on mobile
+    .v-card-text {
+      padding: 8px !important;
+    }
+
+    .v-card-actions {
+      padding: 8px !important;
+    }
+
+    // Mobile image recognition styles
+    .upload-area {
+      padding: 16px;
+      min-height: 120px;
+
+      .upload-placeholder {
+        p {
+          font-size: 12px;
+        }
+      }
+
+      .preview-image {
+        max-height: 200px;
+      }
+    }
+
+    .recognition-controls {
+      gap: 8px;
+
+      .v-btn {
+        font-size: 12px;
+        padding: 4px 12px;
+        min-width: auto;
+      }
+    }
+
+    .board-grid-display {
+      grid-template-columns: repeat(9, 1fr);
+      gap: 1px;
+
+      .grid-cell {
+        min-height: 20px;
+        font-size: 10px;
+      }
     }
   }
-}
 </style>
