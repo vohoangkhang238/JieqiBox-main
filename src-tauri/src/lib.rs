@@ -2,16 +2,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(clippy::uninlined_format_args)]
 
-// --- THÊM CÁC THƯ VIỆN CẦN THIẾT ---
+// --- THƯ VIỆN BỔ SUNG ---
 use screenshots::Screen;
 use std::time::Instant;
-// FIX: Kéo các thành phần cần thiết vào scope và sử dụng Enigo::new() an toàn
-use enigo::{Enigo, MouseControllable, MouseButton}; 
+// FIX E0432: Cần import trait MouseControllable để các method mouse_* hoạt động trên Enigo
+use enigo::{Enigo, MouseButton, MouseControllable, Settings}; 
 use std::thread;
 use std::time::Duration;
-use std::io::Cursor; 
-use std::borrow::Borrow; // Cần thiết cho các thư viện sử dụng generics
-// ------------------------------------
+use std::io::Cursor;
+// ------------------------
 
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -40,33 +39,29 @@ type EngineProcess = Arc<Mutex<Option<CommandChild>>>;
 async fn capture_screen() -> Result<String, String> {
     let start = Instant::now();
     
-    // Lấy màn hình chính
     let screens = Screen::all().map_err(|e| e.to_string())?;
     let screen = screens.first().ok_or("No screen found")?;
 
     println!("[DEBUG] Capturing screen: {:?}", screen);
 
-    // Chụp ảnh
     let image = screen.capture().map_err(|e| e.to_string())?;
 
-    // FIX E0277/E0061: Dùng image.to_png() để lấy buffer trực tiếp
+    // FIX E0277/E0061: Dùng to_png() để lấy buffer trực tiếp từ đối tượng ảnh
     let buffer = image.to_png().map_err(|e| e.to_string())?;
 
-    // Mã hóa sang Base64
     let base64_img = base64::engine::general_purpose::STANDARD.encode(&buffer);
     
     println!("[DEBUG] Screen captured in {:?}", start.elapsed());
     
-    // Trả về chuỗi Data URL để hiển thị ngay
     Ok(format!("data:image/png;base64,{}", base64_img))
 }
 
 // --- [NEW] HÀM AUTO CLICK CHUỘT (KÉO THẢ) (FIXED) ---
 #[tauri::command]
 async fn perform_mouse_move(start_x: i32, start_y: i32, end_x: i32, end_y: i32) -> Result<(), String> {
-    // FIX E0061 & E0599: Khởi tạo Enigo và xử lý Result
-    // Dùng .map_err để xử lý lỗi khởi tạo Enigo, sau đó các hàm mouse_* sẽ hoạt động
-    let mut enigo = Enigo::new().map_err(|e| format!("Failed to create Enigo instance: {}", e))?;
+    // FIX E0061 & E0599: Khởi tạo Enigo an toàn (dùng settings mặc định)
+    let settings = Settings::default();
+    let mut enigo = Enigo::new(&settings).map_err(|e| format!("Failed to create Enigo instance: {}", e))?;
     
     println!("[AUTO] Move: ({},{}) -> ({},{})", start_x, start_y, end_x, end_y);
 
@@ -890,7 +885,7 @@ async fn save_game_notation_with_dialog(content: String, default_filename: Strin
             },
             Some(FilePath::Url(_)) => {
                 Err("URL paths are not supported".to_string())
-            },
+            }
             None => {
                 Err("Save dialog was cancelled".to_string())
             }
