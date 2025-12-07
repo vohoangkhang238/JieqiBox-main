@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import * as ort from 'onnxruntime-web'
 // Import types from the new file
 import { LABELS, type DetectionBox, type ProcessedImage } from './types'
+import { invoke } from '@tauri-apps/api/core' // Import invoke from tauri
 
 export const useImageRecognition = () => {
   const { t } = useI18n()
@@ -640,6 +641,59 @@ export const useImageRecognition = () => {
     return grid
   }
 
+  // --- HÀM MỚI: QUÉT MÀN HÌNH ---
+  const scanScreen = async (): Promise<void> => {
+    if (isProcessing.value) return
+    
+    try {
+      isProcessing.value = true
+      status.value = 'Đang chụp màn hình...'
+      
+      // 1. Gọi lệnh Rust để chụp ảnh
+      const base64Url = await invoke<string>('capture_screen')
+      
+      // 2. Chuyển Base64 thành File để dùng lại logic nhận diện cũ
+      const res = await fetch(base64Url)
+      const blob = await res.blob()
+      const file = new File([blob], "screenshot.png", { type: "image/png" })
+      
+      // 3. Hiển thị ảnh lên giao diện
+      const img = new Image()
+      img.onload = async () => {
+          inputImage.value = img
+          
+          // 4. Chạy mô hình YOLO để nhận diện
+          status.value = 'Đang nhận diện bàn cờ...'
+          const prep = await preprocess(img)
+          
+          // Chạy Inference
+          const inputName = session.value!.inputNames[0]
+          const feeds = { [inputName]: prep.tensor }
+          const results = await session.value!.run(feeds)
+          
+          const firstOut = results.output0 || results[Object.keys(results)[0]]
+          const outputData = firstOut.data as unknown as number[]
+          const outShape = firstOut.dims as number[]
+          
+          // Hậu xử lý (Vẽ khung)
+          const boxes = postprocess(outputData, outShape, prep.meta)
+          detectedBoxes.value = boxes
+          
+          // Cập nhật lại lưới bàn cờ (quan trọng cho Auto sau này)
+          // updateBoardGrid(boxes) 
+          
+          status.value = 'Quét xong! Đã tìm thấy bàn cờ.'
+          isProcessing.value = false
+      }
+      img.src = URL.createObjectURL(file)
+      
+    } catch (error) {
+      console.error('Scan failed:', error)
+      status.value = 'Lỗi quét: ' + error
+      isProcessing.value = false
+    }
+  }
+
   return {
     session,
     isModelLoading,
@@ -653,5 +707,6 @@ export const useImageRecognition = () => {
     drawBoundingBoxes,
     updateBoardGrid,
     initializeModel,
+    scanScreen, // Added the new scanScreen function to the return object
   }
 }
