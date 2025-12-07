@@ -2,15 +2,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(clippy::uninlined_format_args)]
 
-// --- THƯ VIỆN BỔ SUNG ---
+// --- CẬP NHẬT IMPORT ĐÚNG CHO ENIGO 0.2 VÀ IMAGE ---
 use screenshots::Screen;
 use std::time::Instant;
-// FIX E0432: Cần import trait MouseControllable để các method mouse_* hoạt động trên Enigo
-use enigo::{Enigo, MouseButton, MouseControllable, Settings}; 
+// Enigo 0.2 dùng trait Mouse và Button, Coordinate, Direction
+use enigo::{Enigo, Mouse, Button, Coordinate, Direction, Settings}; 
 use std::thread;
 use std::time::Duration;
 use std::io::Cursor;
-// ------------------------
+use image::ImageFormat; // Import để định dạng ảnh PNG
+// ----------------------------------------------------
 
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -34,7 +35,7 @@ use opening_book::{JieqiOpeningBook, MoveData, OpeningBookStats, AddEntryRequest
 type EngineProcess = Arc<Mutex<Option<CommandChild>>>;
 // -------------------------------------------------------------
 
-// --- [NEW] HÀM CHỤP ẢNH MÀN HÌNH (FIXED) ---
+// --- [NEW] HÀM CHỤP ẢNH MÀN HÌNH (ĐÃ FIX LỖI BUFFER) ---
 #[tauri::command]
 async fn capture_screen() -> Result<String, String> {
     let start = Instant::now();
@@ -46,8 +47,13 @@ async fn capture_screen() -> Result<String, String> {
 
     let image = screen.capture().map_err(|e| e.to_string())?;
 
-    // FIX E0277/E0061: Dùng to_png() để lấy buffer trực tiếp từ đối tượng ảnh
-    let buffer = image.to_png().map_err(|e| e.to_string())?;
+    // FIX: Chuyển RgbaImage sang DynamicImage để dùng được write_to
+    let dyn_image = image::DynamicImage::ImageRgba8(image);
+    
+    let mut buffer = Vec::new();
+    // FIX: Dùng write_to thay vì save, và chỉ định format Png
+    dyn_image.write_to(&mut Cursor::new(&mut buffer), ImageFormat::Png)
+             .map_err(|e| e.to_string())?;
 
     let base64_img = base64::engine::general_purpose::STANDARD.encode(&buffer);
     
@@ -56,59 +62,50 @@ async fn capture_screen() -> Result<String, String> {
     Ok(format!("data:image/png;base64,{}", base64_img))
 }
 
-// --- [NEW] HÀM AUTO CLICK CHUỘT (KÉO THẢ) (FIXED) ---
+// --- [NEW] HÀM AUTO CLICK CHUỘT (ĐÃ FIX CHO ENIGO 0.2) ---
 #[tauri::command]
 async fn perform_mouse_move(start_x: i32, start_y: i32, end_x: i32, end_y: i32) -> Result<(), String> {
-    // FIX E0061 & E0599: Khởi tạo Enigo an toàn (dùng settings mặc định)
-    let settings = Settings::default();
-    let mut enigo = Enigo::new(&settings).map_err(|e| format!("Failed to create Enigo instance: {}", e))?;
+    // FIX: Enigo::new() cần tham số Settings trong bản 0.2
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("Init Enigo failed: {}", e))?;
     
     println!("[AUTO] Move: ({},{}) -> ({},{})", start_x, start_y, end_x, end_y);
 
-    // 1. Di chuyển đến quân cờ
-    enigo.mouse_move_to(start_x, start_y);
+    // 1. Di chuyển đến quân cờ (Dùng Coordinate::Abs cho tọa độ màn hình)
+    enigo.move_mouse(start_x, start_y, Coordinate::Abs).map_err(|e| e.to_string())?;
     thread::sleep(Duration::from_millis(50));
     
-    // 2. Nhấn giữ chuột trái
-    enigo.mouse_down(MouseButton::Left);
+    // 2. Nhấn giữ chuột trái (Button::Left, Direction::Press)
+    enigo.button(Button::Left, Direction::Press).map_err(|e| e.to_string())?;
     thread::sleep(Duration::from_millis(50));
     
     // 3. Kéo đến ô đích
-    enigo.mouse_move_to(end_x, end_y);
-    thread::sleep(Duration::from_millis(100)); // Thời gian kéo
+    enigo.move_mouse(end_x, end_y, Coordinate::Abs).map_err(|e| e.to_string())?;
+    thread::sleep(Duration::from_millis(100)); 
     
-    // 4. Thả chuột
-    enigo.mouse_up(MouseButton::Left);
+    // 4. Thả chuột (Button::Left, Direction::Release)
+    enigo.button(Button::Left, Direction::Release).map_err(|e| e.to_string())?;
     
     Ok(())
 }
 
-
 /// Check if the engine file exists and is a file on Android.
-/// This is a prerequisite for setting permissions and spawning.
 #[cfg(target_os = "android")]
 fn check_android_engine_file(path: &str) -> Result<(), String> {
     let engine_path = Path::new(path);
-    
-    // Check if file exists at the given path
     if !engine_path.exists() {
         return Err(format!("Engine file not found: {}", path));
     }
-    
-    // Check if the path points to a file, not a directory
     if let Ok(metadata) = fs::metadata(engine_path) {
         if !metadata.is_file() {
             return Err(format!("Path is not a file: {}", path));
         }
     } else {
-        // This can happen if we lack permissions to read metadata
         return Err(format!("Cannot access engine file metadata: {}", path));
     }
     Ok(())
 }
 
 /// Copy a file from a user-accessible directory to the app's internal storage.
-/// Used for the legacy engine scanning mechanism.
 #[cfg(target_os = "android")]
 fn copy_file_to_internal_storage(source_path_str: &str, app_handle: &AppHandle) -> Result<String, String> {
     let source_path = Path::new(source_path_str);
@@ -118,7 +115,6 @@ fn copy_file_to_internal_storage(source_path_str: &str, app_handle: &AppHandle) 
         return Err(error_msg);
     }
 
-    // Use dynamic bundle identifier for a robust internal storage path
     let bundle_identifier = &app_handle.config().identifier;
     let internal_dir = format!("/data/data/{}/files/engines", bundle_identifier);
     if let Err(e) = fs::create_dir_all(&internal_dir) {
@@ -127,7 +123,6 @@ fn copy_file_to_internal_storage(source_path_str: &str, app_handle: &AppHandle) 
         return Err(error_msg);
     }
 
-    // Generate destination path using the original filename
     let filename = source_path.file_name()
         .ok_or_else(|| "Invalid source path".to_string())?
         .to_str()
@@ -137,7 +132,6 @@ fn copy_file_to_internal_storage(source_path_str: &str, app_handle: &AppHandle) 
 
     let _ = app_handle.emit("engine-output", format!("[DEBUG] Copying file from {} to {}", source_path.display(), dest_path.display()));
 
-    // Copy the file
     if let Err(e) = fs::copy(source_path, dest_path) {
         let error_msg = format!("Failed to copy file: {}", e);
         let _ = app_handle.emit("engine-output", format!("[DEBUG] {}", error_msg));
@@ -146,11 +140,9 @@ fn copy_file_to_internal_storage(source_path_str: &str, app_handle: &AppHandle) 
 
     let _ = app_handle.emit("engine-output", "[DEBUG] Setting executable permission...");
     
-    // Set executable permissions (rwxr-xr-x) which is crucial on Android/Linux
     match fs::metadata(dest_path) {
         Ok(metadata) => {
             let mut permissions = metadata.permissions();
-            // Set permissions to 0o755
             permissions.set_mode(0o755);   
 
             if let Err(e) = fs::set_permissions(dest_path, permissions) {
@@ -170,117 +162,93 @@ fn copy_file_to_internal_storage(source_path_str: &str, app_handle: &AppHandle) 
     Ok(dest_path_str)
 }
 
-/// Save game notation to Android's external, user-accessible storage.
+/// Save game notation to Android's external storage.
 #[tauri::command]
 async fn save_game_notation(content: String, filename: String, app: AppHandle) -> Result<String, String> {
     if !cfg!(target_os = "android") {
         return Err("This function is only available on Android".to_string());
     }
 
-    // Use dynamic bundle identifier for external storage path
     let bundle_identifier = &app.config().identifier;
     let external_dir = format!("/storage/emulated/0/Android/data/{}/files/notations", bundle_identifier);
     
-    // Create the "notations" directory if it doesn't exist
     if let Err(e) = fs::create_dir_all(&external_dir) {
-        let error_msg = format!("Failed to create notations directory: {}", e);
-        return Err(error_msg);
+        return Err(format!("Failed to create notations directory: {}", e));
     }
 
-    // Generate the full file path for the new notation file
     let file_path_str = format!("{}/{}", external_dir, filename);
     let file_path = Path::new(&file_path_str);
 
-    // Write the provided content to the file
     if let Err(e) = fs::write(file_path, content) {
-        let error_msg = format!("Failed to write notation file: {}", e);
-        return Err(error_msg);
+        return Err(format!("Failed to write notation file: {}", e));
     }
 
     Ok(file_path_str)
 }
 
-/// Save chart image to Android's external, user-accessible storage.
+/// Save chart image to Android's external storage.
 #[tauri::command]
 async fn save_chart_image(content: String, filename: String, app: AppHandle) -> Result<String, String> {
     if !cfg!(target_os = "android") {
         return Err("This function is only available on Android".to_string());
     }
 
-    // Use dynamic bundle identifier for external storage path
     let bundle_identifier = &app.config().identifier;
     let external_dir = format!("/storage/emulated/0/Android/data/{}/files/charts", bundle_identifier);
     
-    // Create the "charts" directory if it doesn't exist
     if let Err(e) = fs::create_dir_all(&external_dir) {
-        let error_msg = format!("Failed to create charts directory: {}", e);
-        return Err(error_msg);
+        return Err(format!("Failed to create charts directory: {}", e));
     }
 
-    // Decode base64 content
     let cleaned_content = content.replace("data:image/png;base64,", "");
     let decoded_content = match base64::engine::general_purpose::STANDARD.decode(&cleaned_content) {
         Ok(data) => data,
         Err(e) => return Err(format!("Failed to decode image data: {}", e)),
     };
 
-    // Generate the full file path for the new chart image file
     let file_path_str = format!("{}/{}", external_dir, filename);
     let file_path = Path::new(&file_path_str);
 
-    // Write the provided content to the file
     if let Err(e) = fs::write(file_path, decoded_content) {
-        let error_msg = format!("Failed to write chart image file: {}", e);
-        return Err(error_msg);
+        return Err(format!("Failed to write chart image file: {}", e));
     }
 
     Ok(file_path_str)
 }
 
-/// Get the path to the configuration file, which varies by platform.
 fn get_config_file_path(app: &AppHandle) -> Result<String, String> {
     if cfg!(target_os = "android") {
-        // On Android, use the app's private internal data directory
         let bundle_identifier = &app.config().identifier;
         Ok(format!("/data/data/{}/files/config.ini", bundle_identifier))
     } else {
-        // On desktop, for simplicity, use the same directory as the executable
         Ok("config.ini".to_string())
     }
 }
 
-/// Get the path to the autosave file, which varies by platform.
 fn get_autosave_file_path(app: &AppHandle) -> Result<String, String> {
     if cfg!(target_os = "android") {
-        // On Android, use the app's private internal data directory
         let bundle_identifier = &app.config().identifier;
         Ok(format!("/data/data/{}/files/Autosave.json", bundle_identifier))
     } else {
-        // On desktop, use the same directory as the config file
         Ok("Autosave.json".to_string())
     }
 }
 
-/// Get the path to the opening book database file, which varies by platform.
 fn get_opening_book_db_path(app: &AppHandle) -> Result<String, String> {
     if cfg!(target_os = "android") {
-        // On Android, use the app's private internal data directory
         let bundle_identifier = &app.config().identifier;
         Ok(format!("/data/data/{}/files/jieqi_openings.jb", bundle_identifier))
     } else {
-        // On desktop, use the same directory as the config file
         Ok("jieqi_openings.jb".to_string())
     }
 }
 
-/// Load configuration from the config file.
 #[tauri::command]
 async fn load_config(app: AppHandle) -> Result<String, String> {
     let config_path = get_config_file_path(&app)?;
     let path = Path::new(&config_path);
     
     if !path.exists() {
-        // If the config file doesn't exist, return an empty string, which is valid
         return Ok(String::new());
     }
     
@@ -290,13 +258,11 @@ async fn load_config(app: AppHandle) -> Result<String, String> {
     }
 }
 
-/// Save configuration content to the config file.
 #[tauri::command]
 async fn save_config(content: String, app: AppHandle) -> Result<(), String> {
     let config_path = get_config_file_path(&app)?;
     let path = Path::new(&config_path);
     
-    // Ensure the parent directory exists before writing
     if let Some(parent) = path.parent() {
         if let Err(e) = fs::create_dir_all(parent) {
             return Err(format!("Failed to create config directory: {}", e));
@@ -309,7 +275,6 @@ async fn save_config(content: String, app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// Clear (delete) the configuration file.
 #[tauri::command]
 async fn clear_config(app: AppHandle) -> Result<(), String> {
     let config_path = get_config_file_path(&app)?;
@@ -321,17 +286,15 @@ async fn clear_config(app: AppHandle) -> Result<(), String> {
             Err(e) => Err(format!("Failed to delete config file: {}", e)),
         }
     } else {
-        Ok(()) // File doesn't exist, so there's nothing to do
+        Ok(())
     }
 }
 
-/// Save game notation to autosave file.
 #[tauri::command]
 async fn save_autosave(content: String, app: AppHandle) -> Result<(), String> {
     let autosave_path = get_autosave_file_path(&app)?;
     let path = Path::new(&autosave_path);
     
-    // Ensure the parent directory exists before writing
     if let Some(parent) = path.parent() {
         if let Err(e) = fs::create_dir_all(parent) {
             return Err(format!("Failed to create autosave directory: {}", e));
@@ -344,14 +307,12 @@ async fn save_autosave(content: String, app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// Load game notation from autosave file.
 #[tauri::command]
 async fn load_autosave(app: AppHandle) -> Result<String, String> {
     let autosave_path = get_autosave_file_path(&app)?;
     let path = Path::new(&autosave_path);
     
     if !path.exists() {
-        // If the autosave file doesn't exist, return an empty string
         return Ok(String::new());
     }
     
@@ -361,14 +322,11 @@ async fn load_autosave(app: AppHandle) -> Result<String, String> {
     }
 }
 
-/// Get the path to the user-accessible engine directory for manual placement.
 #[cfg(target_os = "android")]
 fn get_user_engine_directory() -> String {
     "/storage/emulated/0/jieqibox/engines".to_string()
 }
 
-/// Scans user-facing directories for engines, copies them to internal storage,
-/// and then returns a list of all engines available in internal storage.
 #[cfg(target_os = "android")]
 fn sync_and_list_engines(app_handle: &AppHandle) -> Result<Vec<String>, String> {
     let bundle_identifier = &app_handle.config().identifier;
@@ -380,7 +338,6 @@ fn sync_and_list_engines(app_handle: &AppHandle) -> Result<Vec<String>, String> 
     
     let _ = app_handle.emit("engine-output", format!("[DEBUG] Syncing engines. Internal dir: {}. Source dirs: {:?}", internal_dir_str, source_dirs));
     
-    // Ensure the internal engine directory exists
     if let Err(e) = fs::create_dir_all(&internal_dir_str) {
         let error_msg = format!("Failed to create internal directory '{}': {}", internal_dir_str, e);
         let _ = app_handle.emit("engine-output", format!("[DEBUG] {}", error_msg));
@@ -389,7 +346,6 @@ fn sync_and_list_engines(app_handle: &AppHandle) -> Result<Vec<String>, String> 
         let _ = app_handle.emit("engine-output", format!("[DEBUG] Internal directory created/exists: {}", internal_dir_str));
     }
 
-    // Iterate over all possible source directories
     for user_dir in &source_dirs {
         let _ = app_handle.emit("engine-output", format!("[DEBUG] Checking source directory: {}", user_dir));
         let user_path = Path::new(user_dir);
@@ -413,7 +369,6 @@ fn sync_and_list_engines(app_handle: &AppHandle) -> Result<Vec<String>, String> 
         }
     }
 
-    // List all files in the internal directory and return their full paths
     let mut available_engines = Vec::new();
     if let Ok(entries) = fs::read_dir(&internal_dir_str) {
         for entry in entries.flatten() {
@@ -430,7 +385,6 @@ fn sync_and_list_engines(app_handle: &AppHandle) -> Result<Vec<String>, String> 
     Ok(available_engines)
 }
 
-/// Explicitly kills the currently running engine process, if any.
 #[tauri::command]
 async fn kill_engine(process_state: tauri::State<'_, EngineProcess>) -> Result<(), String> {
     if let Some(child) = process_state.lock().unwrap().take() {
@@ -439,7 +393,6 @@ async fn kill_engine(process_state: tauri::State<'_, EngineProcess>) -> Result<(
     Ok(())
 }
 
-/// Spawns a new engine process with a given path and arguments.
 #[tauri::command]
 async fn spawn_engine(
     path: String,
@@ -451,7 +404,6 @@ async fn spawn_engine(
         let _ = app.emit("engine-output", format!("[DEBUG] Spawning engine: Path={}, Args={:?}", path, args));
     }
     
-    // The path must be an absolute, accessible file path
     let final_path = path;
 
     #[cfg(target_os = "android")]
@@ -463,17 +415,14 @@ async fn spawn_engine(
         let _ = app.emit("engine-output", "[DEBUG] Engine file validation passed.");
     }
     
-    // Ensure any previous engine process is terminated before starting a new one
     kill_engine(process_state.clone()).await.ok();
     
-    // The engine's working directory should be its parent directory
     let engine_dir = Path::new(&final_path)
         .parent()
         .ok_or_else(|| "Failed to get engine directory".to_string())?
         .to_str()
         .ok_or_else(|| "Failed to convert engine directory to string".to_string())?;
     
-    // Spawn the new process
     let (mut rx, child) = match app.shell().command(&final_path)
         .args(args)
         .current_dir(engine_dir)
@@ -489,15 +438,12 @@ async fn spawn_engine(
         }
     };
 
-    // Store the new child process in the shared state
     *process_state.lock().unwrap() = Some(child);
     
-    // Spawn an async task to listen for the engine's stdout/stderr
     let app_clone = app.clone();
     async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             if let CommandEvent::Stdout(buf) | CommandEvent::Stderr(buf) = event {
-                // Decode output using GBK for Windows, UTF-8 for others
                 let text = if cfg!(target_os = "windows") {
                     let (cow, ..) = GBK.decode(&buf);
                     cow.into_owned()
@@ -512,7 +458,6 @@ async fn spawn_engine(
     Ok(())
 }
 
-/// Sends a command string to the running engine process.
 #[tauri::command]
 async fn send_to_engine(
     command: String,
@@ -528,14 +473,12 @@ async fn send_to_engine(
     }
 }
 
-/// Get the path to a directory where users can manually place engines.
 #[cfg(target_os = "android")]
 #[tauri::command]
 async fn get_default_android_engine_path() -> Result<String, String> {
     Ok(get_user_engine_directory())
 }
 
-/// Check file permissions on Android.
 #[cfg(target_os = "android")]
 #[tauri::command]
 async fn check_android_file_permissions(path: String) -> Result<bool, String> {
@@ -546,25 +489,21 @@ async fn check_android_file_permissions(path: String) -> Result<bool, String> {
     }
 }
 
-/// Get the app's bundle identifier (package name).
 #[cfg(target_os = "android")]
 #[tauri::command]
 async fn get_bundle_identifier(app: AppHandle) -> Result<String, String> {
     Ok(app.config().identifier.clone())
 }
 
-/// Scan for engines available for the app to use.
 #[cfg(target_os = "android")]
 #[tauri::command]
 async fn scan_android_engines(app: AppHandle) -> Result<Vec<String>, String> {
     sync_and_list_engines(&app)
 }
 
-/// Emits an event to the Android native side to request a file via SAF.
 #[cfg(target_os = "android")]
 #[tauri::command]
 async fn request_saf_file_selection(name: String, args: String, has_nnue: bool, app: AppHandle) -> Result<(), String> {
-    // This command's only job is to forward the request to the native layer
     let _ = app.emit("request-saf-file-selection", serde_json::json!({
         "name": name,
         "args": args,
@@ -573,12 +512,10 @@ async fn request_saf_file_selection(name: String, args: String, has_nnue: bool, 
     Ok(())
 }
 
-/// Handles the result from the SAF file picker, after the native code has
-/// copied the selected file to a temporary, accessible location.
 #[cfg(target_os = "android")]
 #[tauri::command]
 async fn handle_saf_file_result(
-    temp_file_path: String, // IMPORTANT: This must be a real file path, not a content:// URI
+    temp_file_path: String,
     filename: String,
     name: String,
     args: String,
@@ -591,64 +528,47 @@ async fn handle_saf_file_result(
         return Err("SAF file processing failed: temporary path is empty.".to_string());
     }
 
-    // Generate a unique identifier for this specific engine instance to be used as the directory name.
-    // This prevents conflicts if an engine file and a desired directory have the same name,
-    // and also allows adding the same engine multiple times.
     let engine_instance_id = format!("{}_{}", name, chrono::Utc::now().timestamp_millis());
-
-    // Define the final destination directory for the engine using the unique ID.
     let bundle_identifier = &app.config().identifier;
     let engine_base_dir = format!("/data/data/{}/files/engines/{}", bundle_identifier, &engine_instance_id);
 
-    // Create the engine-specific directory
     if let Err(e) = fs::create_dir_all(&engine_base_dir) {
         let error_msg = format!("Failed to create final engine directory: {}", e);
         let _ = app.emit("engine-output", format!("[DEBUG] {}", error_msg));
         return Err(error_msg);
     }
     
-    // Define the final path for the engine executable
     let final_path_str = format!("{}/{}", engine_base_dir, &filename);
 
-    // Move the file from the temporary location to the final destination
     if let Err(e) = fs::rename(&temp_file_path, &final_path_str) {
         let error_msg = format!("Failed to move engine file from temp to final destination: {}", e);
         let _ = app.emit("engine-output", format!("[DEBUG] {}", error_msg));
-        // Fallback to copy if rename fails (e.g., cross-device link)
         if let Err(copy_err) = fs::copy(&temp_file_path, &final_path_str) {
              let copy_error_msg = format!("Fallback copy also failed: {}", copy_err);
              let _ = app.emit("engine-output", format!("[DEBUG] {}", copy_error_msg));
              return Err(copy_error_msg);
         } else {
-            // Copy succeeded, remove the original temp file
             let _ = fs::remove_file(&temp_file_path);
         }
     }
 
-    // Set executable permission on the final file
     let final_path = Path::new(&final_path_str);
     let mut perms = fs::metadata(final_path).map_err(|e| e.to_string())?.permissions();
     perms.set_mode(0o755);
     fs::set_permissions(final_path, perms).map_err(|e| e.to_string())?;
 
-    // Handle NNUE file if requested
     if has_nnue {
         let _ = app.emit("engine-output", "[DEBUG] Engine requires NNUE file, requesting file selection...");
-        
-        // Request NNUE file selection from the frontend
         let nnue_request_data = serde_json::json!({
             "engine_name": name,
             "engine_path": final_path_str,
             "args": args,
             "engine_instance_id": engine_instance_id
         });
-        
-        // Store the engine data temporarily and request NNUE file
         app.emit("request-nnue-file", nnue_request_data).map_err(|e| e.to_string())?;
         return Ok(());
     }
 
-    // Create the ManagedEngine object to send back to the frontend
     let new_engine_data = serde_json::json!({
         "id": format!("engine_{}", chrono::Utc::now().timestamp_millis()),
         "name": name,
@@ -656,13 +576,11 @@ async fn handle_saf_file_result(
         "args": args
     });
 
-    // Notify the frontend that the engine has been successfully added
     app.emit("android-engine-added", new_engine_data).map_err(|e| e.to_string())?;
     
     Ok(())
 }
 
-/// Handle NNUE file result from SAF file selection
 #[cfg(target_os = "android")]
 #[tauri::command]
 async fn handle_nnue_file_result(
@@ -680,31 +598,24 @@ async fn handle_nnue_file_result(
         return Err("NNUE file processing failed: temporary path is empty.".to_string());
     }
 
-    // Get the engine directory path
     let bundle_identifier = &app.config().identifier;
     let engine_base_dir = format!("/data/data/{}/files/engines/{}", bundle_identifier, &engine_instance_id);
-
-    // Define the final path for the NNUE file in the same directory as the engine
     let final_nnue_path_str = format!("{}/{}", engine_base_dir, &filename);
 
-    // Move the NNUE file from the temporary location to the final destination
     if let Err(e) = fs::rename(&temp_file_path, &final_nnue_path_str) {
         let error_msg = format!("Failed to move NNUE file from temp to final destination: {}", e);
         let _ = app.emit("engine-output", format!("[DEBUG] {}", error_msg));
-        // Fallback to copy if rename fails (e.g., cross-device link)
         if let Err(copy_err) = fs::copy(&temp_file_path, &final_nnue_path_str) {
              let copy_error_msg = format!("Fallback copy also failed: {}", copy_err);
              let _ = app.emit("engine-output", format!("[DEBUG] {}", copy_error_msg));
              return Err(copy_error_msg);
         } else {
-            // Copy succeeded, remove the original temp file
             let _ = fs::remove_file(&temp_file_path);
         }
     }
 
     let _ = app.emit("engine-output", format!("[DEBUG] NNUE file successfully copied to: {}", final_nnue_path_str));
 
-    // Create the ManagedEngine object to send back to the frontend
     let new_engine_data = serde_json::json!({
         "id": format!("engine_{}", chrono::Utc::now().timestamp_millis()),
         "name": engine_name,
@@ -712,13 +623,11 @@ async fn handle_nnue_file_result(
         "args": args
     });
 
-    // Notify the frontend that the engine has been successfully added
     app.emit("android-engine-added", new_engine_data).map_err(|e| e.to_string())?;
     
     Ok(())
 }
 
-/// Opens a URL in the system's default browser.
 #[tauri::command]
 async fn open_external_url(url: String, app: AppHandle) -> Result<(), String> {
     let result = if cfg!(target_os = "windows") {
@@ -726,11 +635,9 @@ async fn open_external_url(url: String, app: AppHandle) -> Result<(), String> {
     } else if cfg!(target_os = "macos") {
         Command::new("open").arg(&url).spawn()
     } else if cfg!(target_os = "android") {
-        // On Android, delegate to the native layer
         let _ = app.emit("open-external-url", url);
         return Ok(());
     } else {
-        // Linux
         Command::new("xdg-open").arg(&url).spawn()
     };
 
@@ -742,7 +649,6 @@ async fn open_external_url(url: String, app: AppHandle) -> Result<(), String> {
 
 // Opening Book Commands
 
-/// Add an entry to the opening book
 #[tauri::command]
 async fn opening_book_add_entry(
     request: AddEntryRequest,
@@ -754,7 +660,6 @@ async fn opening_book_add_entry(
         .map_err(|e| e.to_string())
 }
 
-/// Delete an entry from the opening book
 #[tauri::command]
 async fn opening_book_delete_entry(
     fen: String,
@@ -767,7 +672,6 @@ async fn opening_book_delete_entry(
         .map_err(|e| e.to_string())
 }
 
-/// Query moves for a given FEN position
 #[tauri::command]
 async fn opening_book_query_moves(fen: String, app: AppHandle) -> Result<Vec<MoveData>, String> {
     let db_path = get_opening_book_db_path(&app)?;
@@ -775,7 +679,6 @@ async fn opening_book_query_moves(fen: String, app: AppHandle) -> Result<Vec<Mov
     book.query_moves(&fen).map_err(|e| e.to_string())
 }
 
-/// Get opening book statistics
 #[tauri::command]
 async fn opening_book_get_stats(app: AppHandle) -> Result<OpeningBookStats, String> {
     let db_path = get_opening_book_db_path(&app)?;
@@ -783,7 +686,6 @@ async fn opening_book_get_stats(app: AppHandle) -> Result<OpeningBookStats, Stri
     book.get_stats().map_err(|e| e.to_string())
 }
 
-/// Clear all entries from the opening book
 #[tauri::command]
 async fn opening_book_clear_all(app: AppHandle) -> Result<(), String> {
     let db_path = get_opening_book_db_path(&app)?;
@@ -791,7 +693,6 @@ async fn opening_book_clear_all(app: AppHandle) -> Result<(), String> {
     book.clear_all().map_err(|e| e.to_string())
 }
 
-/// Export all opening book entries
 #[tauri::command]
 async fn opening_book_export_all(app: AppHandle) -> Result<String, String> {
     let db_path = get_opening_book_db_path(&app)?;
@@ -800,7 +701,6 @@ async fn opening_book_export_all(app: AppHandle) -> Result<String, String> {
     serde_json::to_string(&entries).map_err(|e| e.to_string())
 }
 
-/// Import opening book entries from JSON
 #[tauri::command]
 async fn opening_book_import_entries(
     json_data: String,
@@ -837,7 +737,6 @@ async fn opening_book_import_entries(
     Ok((imported, errors))
 }
 
-/// Export opening book database file to a specified path
 #[tauri::command]
 async fn opening_book_export_db(destination_path: String, app: AppHandle) -> Result<(), String> {
     let source_path = get_opening_book_db_path(&app)?;
@@ -845,7 +744,6 @@ async fn opening_book_export_db(destination_path: String, app: AppHandle) -> Res
     Ok(())
 }
 
-/// Import opening book database file from a specified path
 #[tauri::command]
 async fn opening_book_import_db(source_path: String, app: AppHandle) -> Result<(), String> {
     let dest_path = get_opening_book_db_path(&app)?;
@@ -853,13 +751,10 @@ async fn opening_book_import_db(source_path: String, app: AppHandle) -> Result<(
     Ok(())
 }
 
-/// Save game notation with a file dialog (for desktop platforms)
-/// On Android, this delegates to the existing save_game_notation function
 #[tauri::command]
 async fn save_game_notation_with_dialog(content: String, default_filename: String, app: AppHandle) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
-        // On Android, use the existing save_game_notation logic
         return save_game_notation(content, default_filename, app).await;
     }
 
@@ -867,7 +762,6 @@ async fn save_game_notation_with_dialog(content: String, default_filename: Strin
     {
         use tauri_plugin_dialog::{DialogExt, FilePath};
         
-        // Show save file dialog
         let file_path = app.dialog()
             .file()
             .set_file_name(&default_filename)
@@ -877,7 +771,6 @@ async fn save_game_notation_with_dialog(content: String, default_filename: Strin
 
         match file_path {
             Some(FilePath::Path(path)) => {
-                // Write content to the selected file
                 fs::write(&path, content)
                     .map_err(|e| format!("Failed to write file: {}", e))?;
                 
@@ -885,7 +778,7 @@ async fn save_game_notation_with_dialog(content: String, default_filename: Strin
             },
             Some(FilePath::Url(_)) => {
                 Err("URL paths are not supported".to_string())
-            }
+            },
             None => {
                 Err("Save dialog was cancelled".to_string())
             }
@@ -893,7 +786,6 @@ async fn save_game_notation_with_dialog(content: String, default_filename: Strin
     }
 }
 
-/// Copy text to clipboard
 #[tauri::command]
 async fn copy_to_clipboard(text: String, _app: AppHandle) -> Result<(), String> {
     let mut ctx: ClipboardContext = ClipboardProvider::new()
@@ -902,7 +794,6 @@ async fn copy_to_clipboard(text: String, _app: AppHandle) -> Result<(), String> 
         .map_err(|e| format!("Failed to copy to clipboard: {}", e))
 }
 
-/// Paste text from clipboard
 #[tauri::command]
 async fn paste_from_clipboard(_app: AppHandle) -> Result<String, String> {
     let mut ctx: ClipboardContext = ClipboardProvider::new()
@@ -911,7 +802,6 @@ async fn paste_from_clipboard(_app: AppHandle) -> Result<String, String> {
         .map_err(|e| format!("Failed to paste from clipboard: {}", e))
 }
 
-// The main entry point for the Tauri application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -933,7 +823,6 @@ pub fn run() {
             save_game_notation_with_dialog,
             copy_to_clipboard,
             paste_from_clipboard,
-            // Opening book commands
             opening_book_add_entry,
             opening_book_delete_entry,
             opening_book_query_moves,
@@ -943,10 +832,10 @@ pub fn run() {
             opening_book_import_entries,
             opening_book_export_db,
             opening_book_import_db,
-            // New commands for auto play
+            // COMMANDS MỚI ĐÃ ĐƯỢC THÊM
             capture_screen, 
             perform_mouse_move, 
-            // Android-specific commands
+            // Android
             #[cfg(target_os = "android")]
             get_bundle_identifier,
             #[cfg(target_os = "android")]
