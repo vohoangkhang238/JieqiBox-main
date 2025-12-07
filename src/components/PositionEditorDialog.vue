@@ -12,7 +12,6 @@
 
       <v-card-text class="pt-0">
         <v-container class="pa-0 position-editor-container">
-          <!-- Action Buttons -->
           <v-row class="mb-2">
             <v-col cols="12">
               <div class="d-flex gap-1 flex-wrap action-buttons">
@@ -65,7 +64,6 @@
             </v-col>
           </v-row>
 
-          <!-- Current side indicator + preserve toggle -->
           <v-row class="mb-2 side-to-move">
             <v-col cols="12">
               <div
@@ -96,7 +94,6 @@
             </v-col>
           </v-row>
 
-          <!-- Image Recognition Panel -->
           <v-row v-if="showImageRecognition" class="mb-2">
             <v-col cols="12">
               <v-card variant="outlined">
@@ -113,7 +110,6 @@
                 </v-card-title>
                 <v-card-text>
                   <div class="image-recognition-container">
-                    <!-- Upload Area -->
                     <div
                       class="upload-area"
                       :class="{ 'drag-over': isDragOver }"
@@ -152,13 +148,14 @@
                       </div>
                     </div>
 
-                    <!-- Status and Controls -->
                     <div class="recognition-controls">
                       <v-alert
                         v-if="recognitionStatus"
                         :type="
                           recognitionStatus.includes('失败') ||
-                          recognitionStatus.includes('错误')
+                          recognitionStatus.includes('错误') ||
+                          recognitionStatus.includes('Failed') ||
+                          recognitionStatus.includes('Lỗi')
                             ? 'error'
                             : 'info'
                         "
@@ -170,6 +167,17 @@
                       </v-alert>
 
                       <div class="d-flex gap-2 flex-wrap align-center">
+                        
+                        <v-btn
+                          @click="scanScreen"
+                          color="purple"
+                          class="text-white"
+                          :disabled="isProcessing"
+                          :loading="isProcessing"
+                          prepend-icon="mdi-monitor-screenshot"
+                        >
+                          Quét Màn Hình
+                        </v-btn>
                         <v-btn
                           @click="processCurrentImage"
                           color="primary"
@@ -194,7 +202,6 @@
                           {{ $t('positionEditor.clear') }}
                         </v-btn>
 
-                        <!-- Bounding boxes toggle -->
                         <v-switch
                           v-model="showBoundingBoxes"
                           :label="$t('positionEditor.showBoundingBoxes')"
@@ -206,7 +213,6 @@
                       </div>
                     </div>
 
-                    <!-- Recognition Results Grid -->
                     <div
                       v-if="boardGrid && boardGrid.length > 0"
                       class="recognition-results"
@@ -239,14 +245,11 @@
             </v-col>
           </v-row>
 
-          <!-- Layout for mobile and desktop -->
           <v-row class="g-0">
-            <!-- Board area -->
             <v-col cols="12" md="8" class="pa-1 board-col">
               <div class="position-editor-board">
                 <img src="@/assets/xiangqi.png" class="board-bg" alt="board" />
 
-                <!-- Pieces -->
                 <div class="pieces">
                   <img
                     v-for="piece in editingPieces"
@@ -261,15 +264,12 @@
                   />
                 </div>
 
-                <!-- Board click area for placing pieces -->
                 <div class="board-click-area" @click="handleBoardClick"></div>
               </div>
             </v-col>
 
-            <!-- Piece selector panel -->
             <v-col cols="12" md="4" class="pa-1 selector-col">
               <div class="piece-selector">
-                <!-- Selected Piece Info -->
                 <div v-if="selectedPiece" class="selected-piece-info mb-3">
                   <h6 class="mb-2">{{ $t('positionEditor.selectedPiece') }}</h6>
                   <div class="selected-piece-display">
@@ -300,7 +300,6 @@
                   {{ $t('positionEditor.addPieces') }}
                 </h5>
 
-                <!-- Known Piece Selection -->
                 <div class="piece-category">
                   <h6 class="mb-1 desktop-only">
                     {{ $t('positionEditor.revealedPieces') }}
@@ -322,7 +321,6 @@
                   </div>
                 </div>
 
-                <!-- Unknown Piece Selection -->
                 <div class="piece-category">
                   <h6 class="mb-1 desktop-only">
                     {{ $t('positionEditor.darkPieces') }}
@@ -347,7 +345,6 @@
             </v-col>
           </v-row>
 
-          <!-- Validation Status -->
           <v-row class="mt-2">
             <v-col cols="12">
               <v-alert
@@ -459,6 +456,7 @@
     processImage,
     drawBoundingBoxes,
     updateBoardGrid,
+    scanScreen, // <--- ĐÃ THÊM HÀM QUÉT MÀN HÌNH VÀO ĐÂY
   } = useImageRecognition()
 
   // Calculate row/col to percentage coordinates
@@ -1696,6 +1694,7 @@
         font-size: 11px;
         padding: 4px 8px;
         min-width: auto;
+        height: 28px;
       }
     }
   }
@@ -1704,267 +1703,79 @@
     @media (max-width: 768px) {
       font-size: 11px;
       padding: 4px 8px;
+      height: 24px;
     }
   }
 
   .validation-alert {
     @media (max-width: 768px) {
-      font-size: 11px;
-      padding: 8px;
+      font-size: 10px;
+      padding: 6px;
+      margin-top: 4px;
     }
   }
 
   .position-editor-container {
     @media (max-width: 768px) {
-      padding: 8px !important;
+      padding: 4px !important;
     }
   }
 
   .board-col {
     @media (max-width: 768px) {
-      padding: 4px !important;
+      padding: 2px !important;
     }
   }
 
   .selector-col {
     @media (max-width: 768px) {
-      padding: 4px !important;
+      padding: 2px !important;
     }
   }
 
-  .side-to-move {
-    margin-top: 0 !important;
+  // Reduce dialog padding on mobile
+  .v-card-text {
+    padding: 8px !important;
   }
 
-  // Hide desktop-only elements on mobile
-  .desktop-only {
-    @media (max-width: 768px) {
-      display: none !important;
-    }
+  .v-card-actions {
+    padding: 8px !important;
   }
 
-  // Image recognition styles
-  .image-recognition-container {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
+  // Mobile image recognition styles
   .upload-area {
-    border: 2px dashed rgba(var(--v-border-color), var(--v-border-opacity));
-    border-radius: 8px;
-    padding: 32px;
-    text-align: center;
-    transition: all 0.3s ease;
-    cursor: pointer;
-    min-height: 200px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    &.drag-over {
-      border-color: rgb(var(--v-theme-primary));
-      background-color: rgba(var(--v-theme-primary), 0.05);
-    }
+    padding: 16px;
+    min-height: 120px;
 
     .upload-placeholder {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-      color: rgba(var(--v-theme-on-surface), 0.6);
-
       p {
-        margin: 0;
-        font-size: 14px;
+        font-size: 12px;
       }
     }
 
-    .image-preview {
-      display: flex;
-      justify-content: center;
-
-      .image-stage {
-        position: relative;
-        display: inline-block;
-        max-width: 100%;
-      }
-
-      .preview-image {
-        display: block;
-        max-width: 100%;
-        max-height: 400px;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-      }
-
-      .overlay-canvas {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-      }
+    .preview-image {
+      max-height: 200px;
     }
   }
 
   .recognition-controls {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
+    gap: 8px;
 
-  .recognition-results {
-    .board-grid-display {
-      display: grid;
-      grid-template-columns: repeat(9, 1fr);
-      gap: 2px;
-      max-width: 300px;
-      margin: 0 auto;
-
-      .grid-row {
-        display: contents;
-      }
-
-      .grid-cell {
-        aspect-ratio: 1;
-        border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 12px;
-        font-weight: bold;
-        background-color: rgb(var(--v-theme-surface));
-        min-height: 24px;
-
-        &.has-piece {
-          background-color: rgba(var(--v-theme-primary), 0.1);
-          color: rgb(var(--v-theme-primary));
-        }
-      }
+    .v-btn {
+      font-size: 12px;
+      padding: 4px 12px;
+      min-width: auto;
     }
   }
 
-  // More compact layout for mobile portrait
-  @media (max-width: 768px) {
-    .piece-selector {
-      padding: 6px;
-      max-height: 250px;
-    }
+  .board-grid-display {
+    grid-template-columns: repeat(9, 1fr);
+    gap: 1px;
 
-    .selected-piece-info {
-      padding: 6px;
-      margin-bottom: 8px;
-
-      .selected-piece-display {
-        gap: 4px;
-        margin-bottom: 4px;
-      }
-
-      .piece-img-large {
-        width: 20px;
-        height: 20px;
-      }
-
-      .hint-text {
-        font-size: 10px;
-      }
-    }
-
-    .piece-category {
-      margin-bottom: 6px;
-    }
-
-    .piece-grid {
-      grid-template-columns: repeat(8, 1fr);
-      gap: 1px;
-    }
-
-    .piece-option {
-      padding: 3px;
-
-      .piece-img {
-        width: 14px;
-        height: 14px;
-      }
-    }
-
-    .action-buttons {
-      gap: 1px !important;
-
-      .v-btn {
-        font-size: 10px;
-        padding: 2px 6px;
-        min-width: auto;
-        height: 28px;
-      }
-    }
-
-    .side-indicator {
+    .grid-cell {
+      min-height: 20px;
       font-size: 10px;
-      padding: 2px 6px;
-      height: 24px;
-    }
-
-    .validation-alert {
-      font-size: 10px;
-      padding: 6px;
-      margin-top: 4px;
-    }
-
-    .position-editor-container {
-      padding: 4px !important;
-    }
-
-    .board-col {
-      padding: 2px !important;
-    }
-
-    .selector-col {
-      padding: 2px !important;
-    }
-
-    // Reduce dialog padding on mobile
-    .v-card-text {
-      padding: 8px !important;
-    }
-
-    .v-card-actions {
-      padding: 8px !important;
-    }
-
-    // Mobile image recognition styles
-    .upload-area {
-      padding: 16px;
-      min-height: 120px;
-
-      .upload-placeholder {
-        p {
-          font-size: 12px;
-        }
-      }
-
-      .preview-image {
-        max-height: 200px;
-      }
-    }
-
-    .recognition-controls {
-      gap: 8px;
-
-      .v-btn {
-        font-size: 12px;
-        padding: 4px 12px;
-        min-width: auto;
-      }
-    }
-
-    .board-grid-display {
-      grid-template-columns: repeat(9, 1fr);
-      gap: 1px;
-
-      .grid-cell {
-        min-height: 20px;
-        font-size: 10px;
-      }
     }
   }
+}
 </style>
