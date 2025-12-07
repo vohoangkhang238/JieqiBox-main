@@ -2,14 +2,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(clippy::uninlined_format_args)]
 
-// --- THÊM CÁC THƯ VIỆN MỚI ---
+// --- THÊM CÁC THƯ VIỆN CẦN THIẾT ---
 use screenshots::Screen;
 use std::time::Instant;
-use enigo::{Enigo, MouseControllable, MouseButton};
+// FIX: Kéo các thành phần cần thiết vào scope và sử dụng Enigo::new() an toàn
+use enigo::{Enigo, MouseControllable, MouseButton}; 
 use std::thread;
 use std::time::Duration;
-use std::io::Cursor;
-// -----------------------------
+use std::io::Cursor; 
+use std::borrow::Borrow; // Cần thiết cho các thư viện sử dụng generics
+// ------------------------------------
 
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -33,14 +35,13 @@ use opening_book::{JieqiOpeningBook, MoveData, OpeningBookStats, AddEntryRequest
 type EngineProcess = Arc<Mutex<Option<CommandChild>>>;
 // -------------------------------------------------------------
 
-// --- [NEW] HÀM CHỤP ẢNH MÀN HÌNH ---
+// --- [NEW] HÀM CHỤP ẢNH MÀN HÌNH (FIXED) ---
 #[tauri::command]
 async fn capture_screen() -> Result<String, String> {
     let start = Instant::now();
     
-    // Lấy danh sách màn hình
+    // Lấy màn hình chính
     let screens = Screen::all().map_err(|e| e.to_string())?;
-    // Lấy màn hình chính (thường là cái đầu tiên)
     let screen = screens.first().ok_or("No screen found")?;
 
     println!("[DEBUG] Capturing screen: {:?}", screen);
@@ -48,10 +49,8 @@ async fn capture_screen() -> Result<String, String> {
     // Chụp ảnh
     let image = screen.capture().map_err(|e| e.to_string())?;
 
-    // Chuyển đổi sang PNG buffer
-    let mut buffer = Vec::new();
-    image.save(&mut Cursor::new(&mut buffer), image::ImageFormat::Png)
-         .map_err(|e| e.to_string())?;
+    // FIX E0277/E0061: Dùng image.to_png() để lấy buffer trực tiếp
+    let buffer = image.to_png().map_err(|e| e.to_string())?;
 
     // Mã hóa sang Base64
     let base64_img = base64::engine::general_purpose::STANDARD.encode(&buffer);
@@ -62,10 +61,12 @@ async fn capture_screen() -> Result<String, String> {
     Ok(format!("data:image/png;base64,{}", base64_img))
 }
 
-// --- [NEW] HÀM AUTO CLICK CHUỘT (KÉO THẢ) ---
+// --- [NEW] HÀM AUTO CLICK CHUỘT (KÉO THẢ) (FIXED) ---
 #[tauri::command]
 async fn perform_mouse_move(start_x: i32, start_y: i32, end_x: i32, end_y: i32) -> Result<(), String> {
-    let mut enigo = Enigo::new();
+    // FIX E0061 & E0599: Khởi tạo Enigo và xử lý Result
+    // Dùng .map_err để xử lý lỗi khởi tạo Enigo, sau đó các hàm mouse_* sẽ hoạt động
+    let mut enigo = Enigo::new().map_err(|e| format!("Failed to create Enigo instance: {}", e))?;
     
     println!("[AUTO] Move: ({},{}) -> ({},{})", start_x, start_y, end_x, end_y);
 
@@ -84,11 +85,9 @@ async fn perform_mouse_move(start_x: i32, start_y: i32, end_x: i32, end_y: i32) 
     // 4. Thả chuột
     enigo.mouse_up(MouseButton::Left);
     
-    // 5. Di chuột ra chỗ khác (tùy chọn, để tránh che tầm nhìn)
-    // enigo.mouse_move_to(0, 0); 
-
     Ok(())
 }
+
 
 /// Check if the engine file exists and is a file on Android.
 /// This is a prerequisite for setting permissions and spawning.
@@ -950,8 +949,8 @@ pub fn run() {
             opening_book_export_db,
             opening_book_import_db,
             // New commands for auto play
-            capture_screen, // Added capture_screen
-            perform_mouse_move, // Added perform_mouse_move
+            capture_screen, 
+            perform_mouse_move, 
             // Android-specific commands
             #[cfg(target_os = "android")]
             get_bundle_identifier,
